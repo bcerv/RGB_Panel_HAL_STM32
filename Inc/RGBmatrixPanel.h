@@ -8,12 +8,12 @@ class RGBmatrixPanel : public Adafruit_GFX{
  public:
 
   // Constructor for 16x32 panel:
-  RGBmatrixPanel(uint8_t a, uint8_t b, uint8_t c,
-    uint8_t sclk, uint8_t latch, uint8_t oe, bool dbuf);
+  RGBmatrixPanel(uint16_t a, uint16_t b, uint16_t c,
+		  uint16_t sclk, uint16_t latch, uint16_t oe, bool dbuf);
 
   // Constructor for 32x32 panel (adds 'd' pin):
-  RGBmatrixPanel(uint8_t a, uint8_t b, uint8_t c, uint8_t d,
-    uint8_t sclk, uint8_t latch, uint8_t oe, bool dbuf, uint8_t width=32);
+  RGBmatrixPanel(uint16_t a, uint16_t b, uint16_t c, uint16_t d,
+		  uint16_t sclk, uint16_t latch, uint16_t oe, bool dbuf, uint16_t width=32);
 
   void
     begin(void),
@@ -39,13 +39,16 @@ class RGBmatrixPanel : public Adafruit_GFX{
   volatile bool swapflag;
 
   // Init/alloc code common to both constructors:
-  void init(uint8_t rows, uint8_t a, uint8_t b, uint8_t c,
-	    uint8_t sclk, uint8_t latch, uint8_t oe, bool dbuf,
-	    uint8_t width);
+  void init(uint16_t rows, uint16_t a, uint16_t b, uint16_t c,
+		  uint16_t sclk, uint16_t latch, uint16_t oe, bool dbuf,
+		  uint16_t width);
+
+
+  void INTRP_TIM3_Init(void);
 
   // PORT register pointers, pin bitmasks, pin numbers:
-  volatile uint8_t
-    *latport, *oeport, *addraport, *addrbport, *addrcport, *addrdport;
+  /*volatile uint8_t
+    *latport, *oeport, *addraport, *addrbport, *addrcport, *addrdport;*/
   uint8_t
     sclkpin, latpin, oepin, addrapin, addrbpin, addrcpin, addrdpin,
     _sclk, _latch, _oe, _a, _b, _c, _d;

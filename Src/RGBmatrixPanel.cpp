@@ -50,11 +50,13 @@ BSD license, all text above must be included in any redistribution.
 
 
  // Ports for "standard" boards (Arduino Uno, Duemilanove, etc.)
- #define DATAPORT GPIOD;
- #define DATADIR  DDRD
+ #define DATAPORT GPIOD->ODR
+ #define DATADIR GPIOD->MODER
  #define SCLKPORT GPIOB
 
 #define nPlanes 4
+
+TIM_HandleTypeDef htim3;
 
 // The fact that the display driver interrupt stuff is tied to the
 // singular Timer1 doesn't really take well to object orientation with
@@ -66,9 +68,42 @@ BSD license, all text above must be included in any redistribution.
 // are even an actual need.
 static RGBmatrixPanel *activePanel = NULL;
 
+void INTRP_TIM3_Init(void){
+	TIM_SlaveConfigTypeDef sSlaveConfig;
+	TIM_MasterConfigTypeDef sMasterConfig;
+
+	htim3.Instance = TIM3;
+	htim3.Init.Prescaler = TODO;
+	htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+	htim3.Init.Period = TODO;
+	htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+	if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+	{
+		//Error_Handler();
+	}
+
+	sSlaveConfig.SlaveMode = TIM_SLAVEMODE_DISABLE;
+	sSlaveConfig.InputTrigger = TIM_TS_ITR0;
+	if (HAL_TIM_SlaveConfigSynchronization(&htim3, &sSlaveConfig) != HAL_OK)
+	{
+		//Error_Handler();
+	}
+
+	sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+	sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+	if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
+	{
+		//Error_Handler();
+	}
+
+	HAL_NVIC_EnableIRQ(TIM3_IRQn);
+	HAL_TIM_Base_Start_IT(&htim3);
+
+}
+
 // Code common to both the 16x32 and 32x32 constructors:
-void RGBmatrixPanel::init(uint8_t rows, uint8_t a, uint8_t b, uint8_t c,
-  uint8_t sclk, uint8_t latch, uint8_t oe, bool dbuf, uint8_t width) {
+void RGBmatrixPanel::init(uint16_t rows, uint16_t a, uint16_t b, uint16_t c,
+		uint16_t sclk, uint16_t latch, uint16_t oe, bool dbuf, uint16_t width) {
 
   nRows = rows; // Number of multiplexed rows; actual height is 2X this
 
@@ -81,12 +116,20 @@ void RGBmatrixPanel::init(uint8_t rows, uint8_t a, uint8_t b, uint8_t c,
   matrixbuff[1] = (dbuf == true) ? &matrixbuff[0][buffsize] : matrixbuff[0];
 
   // Save pin numbers for use by begin() method later.
-  _a     = a;
+  /*_a     = a;
   _b     = b;
   _c     = c;
   _sclk  = sclk;
   _latch = latch;
-  _oe    = oe;
+  _oe    = oe;*/
+
+  _a     = SCLKPORT | GPIO_PIN_15;
+  _b     = SCLKPORT | GPIO_PIN_14;
+  _c     = SCLKPORT | GPIO_PIN_13;
+  _sclk  = SCLKPORT | GPIO_PIN_12;
+  _latch = SCLKPORT | GPIO_PIN_11;
+  _oe    = SCLKPORT | GPIO_PIN_10;
+
 
  /* // Look up port registers and pin masks ahead of time,
   // avoids many slow digitalWrite() calls later.
@@ -109,8 +152,8 @@ void RGBmatrixPanel::init(uint8_t rows, uint8_t a, uint8_t b, uint8_t c,
 
 // Constructor for 16x32 panel:
 RGBmatrixPanel::RGBmatrixPanel(
-  uint8_t a, uint8_t b, uint8_t c,
-  uint8_t sclk, uint8_t latch, uint8_t oe, bool dbuf) :
+  uint16_t a, uint16_t b, uint16_t c,
+  uint16_t sclk, uint16_t latch, uint16_t oe, bool dbuf) :
   Adafruit_GFX(32, 16) {
 
   init(8, a, b, c, sclk, latch, oe, dbuf, 32);
@@ -118,16 +161,16 @@ RGBmatrixPanel::RGBmatrixPanel(
 
 // Constructor for 32x32 or 32x64 panel:
 RGBmatrixPanel::RGBmatrixPanel(
-  uint8_t a, uint8_t b, uint8_t c, uint8_t d,
-  uint8_t sclk, uint8_t latch, uint8_t oe, bool dbuf, uint8_t width) :
+		uint16_t a, uint16_t b, uint16_t c, uint16_t d,
+		uint16_t sclk, uint16_t latch, uint16_t oe, bool dbuf, uint16_t width) :
   Adafruit_GFX(width, 32) {
 
   init(16, a, b, c, sclk, latch, oe, dbuf, width);
 
   // Init a few extra 32x32-specific elements:
   _d        = d;
-  addrdport = portOutputRegister(digitalPinToPort(d));
-  addrdpin  = digitalPinToBitMask(d);
+  /*addrdport = portOutputRegister(digitalPinToPort(d));
+  addrdpin  = digitalPinToBitMask(d);*/
 }
 
 void RGBmatrixPanel::begin(void) {
@@ -137,7 +180,15 @@ void RGBmatrixPanel::begin(void) {
   activePanel = this;                      // For interrupt hander
 
   // Enable all comm & address pins as outputs, set default states:
-  pinMode(_sclk , OUTPUT); SCLKPORT   &= ~sclkpin;  // Low
+  GPIO_InitTypeDef GPIO_SCLK_init;
+  GPIO_SCLK_init.Pin = _a | _b | _c | _sclk | _latch | _oe;
+
+  	 GPIO_InitTypeDef GPIO_InitStruct;
+     GPIO_SCLK_init.Mode = GPIO_MODE_OUTPUT_PP;
+     GPIO_SCLK_init.Pull = GPIO_NOPULL;
+     GPIO_SCLK_init.Speed = GPIO_SPEED_HIGH;
+     HAL_GPIO_Init(GPIOD, &GPIO_SCLK_init);
+  /*pinMode(_sclk , OUTPUT); SCLKPORT   &= ~sclkpin;  // Low
   pinMode(_latch, OUTPUT); *latport   &= ~latpin;   // Low
   pinMode(_oe   , OUTPUT); *oeport    |= oepin;     // High (disable output)
   pinMode(_a    , OUTPUT); *addraport &= ~addrapin; // Low
@@ -145,19 +196,26 @@ void RGBmatrixPanel::begin(void) {
   pinMode(_c    , OUTPUT); *addrcport &= ~addrcpin; // Low
   if(nRows > 8) {
     pinMode(_d  , OUTPUT); *addrdport &= ~addrdpin; // Low
-  }
+  }*/
 
   // The high six bits of the data port are set as outputs;
   // Might make this configurable in the future, but not yet.
-  DATADIR  = 0b11111100;
-  DATAPORT = 0;
+     uint16_t position = 0x00;
+     uint32_t DirRegister = 0x00;
+     for(position = 0; position < 16U; position++){
+    	 /*DATADIR  = 0x55555555U;//0b 0101 0101 0101 0101 0101 0101 0101 0101;
+    	   DATAPORT = 0;*/
+    	 DirRegister |= ((uint32_t) 0x01) >> (position * 2);
+     }
+     DATADIR = DirRegister;
 
   // Set up Timer1 for interrupt:
-  TCCR1A  = _BV(WGM11); // Mode 14 (fast PWM), OC1A off
+     INTRP_TIM3_Init();
+  /*TCCR1A  = _BV(WGM11); // Mode 14 (fast PWM), OC1A off
   TCCR1B  = _BV(WGM13) | _BV(WGM12) | _BV(CS10); // Mode 14, no prescale
   ICR1    = 100;
   TIMSK1 |= _BV(TOIE1); // Enable Timer1 interrupt
-  sei();                // Enable global interrupts
+  sei();                // Enable global interrupts*/
 }
 
 // Original RGBmatrixPanel library used 3/3/3 color.  Later version used
@@ -358,8 +416,8 @@ void RGBmatrixPanel::swapBuffers(bool copy) {
 // output to change the 'img' name for each.  Data can then be loaded
 // back into the display using a pgm_read_byte() loop.
 void RGBmatrixPanel::dumpMatrix(void) {
-
-  int i, buffsize = WIDTH * nRows * 3;
+//TODO savoir comment print en console
+  /*int i, buffsize = WIDTH * nRows * 3;
 
   Serial.print(F("\n\n"
     "#include <avr/pgmspace.h>\n\n"
@@ -374,14 +432,23 @@ void RGBmatrixPanel::dumpMatrix(void) {
       else             Serial.write(',');
     }
   }
-  Serial.println(F("\n};"));
+  Serial.println(F("\n};"));*/
 }
 
 // -------------------- Interrupt handler stuff --------------------
 
-ISR(TIMER1_OVF_vect, ISR_BLOCK) { // ISR_BLOCK important -- see notes later
+/*ISR(TIMER1_OVF_vect, ISR_BLOCK) { // ISR_BLOCK important -- see notes later
   activePanel->updateDisplay();   // Call refresh func for active display
   TIFR1 |= TOV1;                  // Clear Timer1 interrupt flag
+}*/
+void TIM3_IRQHandler(){
+	HAL_TIM_IRQHandler(&htim3);
+}
+
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
+	if(htim->Instance==TIM3){
+		activePanel->updateDisplay();
+	}
 }
 
 // Two constants are used in timing each successive BCM interval.
