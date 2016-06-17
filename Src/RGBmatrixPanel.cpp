@@ -50,9 +50,13 @@ BSD license, all text above must be included in any redistribution.
 
 
  // Ports for "standard" boards (Arduino Uno, Duemilanove, etc.)
- #define DATAPORT GPIOD->ODR
- #define DATADIR GPIOD->MODER
- #define SCLKPORT GPIOB
+ //#define DATAPORT GPIOE->ODR
+ //#define DATADIR GPIOE->MODER
+	#define CTRLPORT1 GPIOE
+	#define SCLKMASK 0b111111000000000 //_oe, _latch, _sclk, _c, _b, _a, 00 000 000
+	#define DATAMASK 0b000000000111111 // 000 000 00 B2, G2, R2, B1, G1, R1
+
+//Pour les 3 port de pilotage PD, PE, PF
 
 #define nPlanes 4
 
@@ -123,12 +127,12 @@ void RGBmatrixPanel::init(uint16_t rows, uint16_t a, uint16_t b, uint16_t c,
   _latch = latch;
   _oe    = oe;*/
 
-  _a     = SCLKPORT | GPIO_PIN_15;
-  _b     = SCLKPORT | GPIO_PIN_14;
-  _c     = SCLKPORT | GPIO_PIN_13;
-  _sclk  = SCLKPORT | GPIO_PIN_12;
-  _latch = SCLKPORT | GPIO_PIN_11;
-  _oe    = SCLKPORT | GPIO_PIN_10;
+  _a     = CTRLPORT1 | GPIO_PIN_10;
+  _b     = CTRLPORT1 | GPIO_PIN_11;
+  _c     = CTRLPORT1 | GPIO_PIN_12;
+  _sclk  = CTRLPORT1 | GPIO_PIN_13;
+  _latch = CTRLPORT1 | GPIO_PIN_14;
+  _oe    = CTRLPORT1 | GPIO_PIN_15;
 
 
  /* // Look up port registers and pin masks ahead of time,
@@ -180,6 +184,8 @@ void RGBmatrixPanel::begin(void) {
   activePanel = this;                      // For interrupt hander
 
   // Enable all comm & address pins as outputs, set default states:
+  // The high six bits of the data port are set as outputs;
+  // Might make this configurable in the future, but not yet.
   GPIO_InitTypeDef GPIO_SCLK_init;
   GPIO_SCLK_init.Pin = _a | _b | _c | _sclk | _latch | _oe;
 
@@ -187,7 +193,7 @@ void RGBmatrixPanel::begin(void) {
      GPIO_SCLK_init.Mode = GPIO_MODE_OUTPUT_PP;
      GPIO_SCLK_init.Pull = GPIO_NOPULL;
      GPIO_SCLK_init.Speed = GPIO_SPEED_HIGH;
-     HAL_GPIO_Init(GPIOD, &GPIO_SCLK_init);
+     HAL_GPIO_Init(CTRLPORT1, &GPIO_SCLK_init);
   /*pinMode(_sclk , OUTPUT); SCLKPORT   &= ~sclkpin;  // Low
   pinMode(_latch, OUTPUT); *latport   &= ~latpin;   // Low
   pinMode(_oe   , OUTPUT); *oeport    |= oepin;     // High (disable output)
@@ -197,17 +203,6 @@ void RGBmatrixPanel::begin(void) {
   if(nRows > 8) {
     pinMode(_d  , OUTPUT); *addrdport &= ~addrdpin; // Low
   }*/
-
-  // The high six bits of the data port are set as outputs;
-  // Might make this configurable in the future, but not yet.
-     uint16_t position = 0x00;
-     uint32_t DirRegister = 0x00;
-     for(position = 0; position < 16U; position++){
-    	 /*DATADIR  = 0x55555555U;//0b 0101 0101 0101 0101 0101 0101 0101 0101;
-    	   DATAPORT = 0;*/
-    	 DirRegister |= ((uint32_t) 0x01) >> (position * 2);
-     }
-     DATADIR = DirRegister;
 
   // Set up Timer1 for interrupt:
      INTRP_TIM3_Init();
@@ -500,8 +495,8 @@ void RGBmatrixPanel::updateDisplay(void) {
   uint8_t  i, tick, tock, *ptr;
   uint16_t t, duration;
 
-  *oeport  |= oepin;  // Disable LED output during row/plane switchover
-  *latport |= latpin; // Latch data loaded during *prior* interrupt
+  CTRLPORT1->ODR |= oepin;  // Disable LED output during row/plane switchover
+  CTRLPORT1->ODR |= latpin; // Latch data loaded during *prior* interrupt
 
   // Calculate time to next interrupt BEFORE incrementing plane #.
   // This is because duration is the display time for the data loaded
@@ -533,26 +528,24 @@ void RGBmatrixPanel::updateDisplay(void) {
   } else if(plane == 1) {
     // Plane 0 was loaded on prior interrupt invocation and is about to
     // latch now, so update the row address lines before we do that:
-    if(row & 0x1)   *addraport |=  addrapin;
-    else            *addraport &= ~addrapin;
-    if(row & 0x2)   *addrbport |=  addrbpin;
-    else            *addrbport &= ~addrbpin;
-    if(row & 0x4)   *addrcport |=  addrcpin;
-    else            *addrcport &= ~addrcpin;
-    if(nRows > 8) {
-      if(row & 0x8) *addrdport |=  addrdpin;
-      else          *addrdport &= ~addrdpin;
-    }
+    if(row & 0x1)   CTRLPORT1->ODR |=  _a;
+    else            CTRLPORT1->ODR &= ~_a;
+    if(row & 0x2)   CTRLPORT1->ODR |=  _b;
+    else            CTRLPORT1->ODR &= ~_b;
+    if(row & 0x4)   CTRLPORT1->ODR |=  _c;
+    else            CTRLPORT1->ODR &= ~_c;
   }
 
   // buffptr, being 'volatile' type, doesn't take well to optimization.
   // A local register copy can speed some things up:
   ptr = (uint8_t *)buffptr;
 
-  ICR1      = duration; // Set interval for next interrupt
-  TCNT1     = 0;        // Restart interrupt timer
-  *oeport  &= ~oepin;   // Re-enable output
-  *latport &= ~latpin;  // Latch down
+  /*ICR1      = duration; // Set interval for next interrupt
+  TCNT1     = 0;        // Restart interrupt timer*/
+  htim3.Instance->ARR = duration * 10; // Set interval for next interrupt
+  htim3.Instance->CNT = 0;// Restart interrupt timer
+  CTRLPORT1->ODR  &= ~oepin;   // Re-enable output
+  CTRLPORT1->ODR &= ~latpin;  // Latch down
 
   // Record current state of SCLKPORT register, as well as a second
   // copy with the clock bit set.  This makes the innnermost data-
@@ -562,7 +555,9 @@ void RGBmatrixPanel::updateDisplay(void) {
   // handler is set ISR_BLOCK, halting any other interrupts that
   // might otherwise also be twiddling the port at the same time
   // (else this would clobber them).
-  tock = SCLKPORT;
+  /*tock = SCLKPORT;
+  tick = tock | sclkpin;*/
+  tock = CTRLPORT1->ODR & SCLKMASK;
   tick = tock | sclkpin;
 
   if(plane > 0) { // 188 ticks from TCNT1=0 (above) to end of function
@@ -574,7 +569,7 @@ void RGBmatrixPanel::updateDisplay(void) {
     // A tiny bit of inline assembly is used; compiler doesn't pick
     // up on opportunity for post-increment addressing mode.
     // 5 instruction ticks per 'pew' = 160 ticks total
-    #define pew asm volatile(                 \
+    /*#define pew asm volatile(                 \
       "ld  __tmp_reg__, %a[ptr]+"    "\n\t"   \
       "out %[data]    , __tmp_reg__" "\n\t"   \
       "out %[clk]     , %[tick]"     "\n\t"   \
@@ -597,8 +592,22 @@ void RGBmatrixPanel::updateDisplay(void) {
     pew pew pew pew pew pew pew pew
     pew pew pew pew pew pew pew pew
       }
+	*/
 
-    buffptr = ptr; //+= 32;
+	  uint8_t pin;
+	  for(uint8_t i = 0; i < WIDTH; i++){
+		//B2,G2,R2,B1,G1,R1
+		pin = ptr[i];
+		CTRLPORT1->BSRR = (pin >> 2); //Set right pin
+		CTRLPORT1->BSRR = (~pin << 14); //Reset the other
+
+		//TODO pas sur
+		CTRLPORT1->ODR |= tick; // Clock lo
+		CTRLPORT1->ODR |= tock; // Clock hi
+	  }
+    //buffptr = ptr; //+= 32;
+	buffptr += WIDTH;
+
 
   } else { // 920 ticks from TCNT1=0 (above) to end of function
 
@@ -611,14 +620,19 @@ void RGBmatrixPanel::updateDisplay(void) {
     // output for plane 0 is handled while plane 3 is being displayed...
     // because binary coded modulation is used (not PWM), that plane
     // has the longest display interval, so the extra work fits.
-    for(i=0; i<WIDTH; i++) {
-      DATAPORT =
-        ( ptr[i]    << 6)         |
-        ((ptr[i+WIDTH] << 4) & 0x30) |
-        ((ptr[i+WIDTH*2] << 2) & 0x0C);
-      SCLKPORT = tick; // Clock lo
-      SCLKPORT = tock; // Clock hi
-    } 
+	  uint8_t pin;
+	for(i=0; i<WIDTH; i++) {
+		pin = ( ptr[i] << 6) | ((ptr[i+WIDTH] << 4) & 0x30) | ((ptr[i+WIDTH*2] << 2) & 0x0C);
+		CTRLPORT1->BSRR = (pin >> 2); //Set right pin
+		CTRLPORT1->BSRR = (~pin << 14); //Reset the other
+
+		/*SCLKPORT = tick; // Clock lo
+		SCLKPORT = tock; // Clock hi*/
+
+		//TODO pas sur utiliser BSRR ?
+		CTRLPORT1->ODR |= tick; // Clock lo
+		CTRLPORT1->ODR |= tock; // Clock hi
+	}
   }
 }
 
