@@ -1,6 +1,8 @@
 #ifndef _GAMMA_H_
 #define _GAMMA_H_
 
+#include <stdint.h>
+
 //static const uint8_t PROGMEM gamma[] = {
 static const uint8_t gamma[] = {
   0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
